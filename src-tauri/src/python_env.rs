@@ -517,6 +517,26 @@ pub async fn setup_python_env(app_name: String, python_version_spec: &str) -> Re
 pub fn setup_python_env(_app_name: String, _python_version_spec: &str) -> Result<PathBuf> {
     Err(anyhow!("setup_python_env is only implemented for Windows."))
 }
+/// Expand the {PIP_TORCH_INDEX_URL} placeholder in a pip_args string into the
+/// user-selected torch (CUDA) index URL. Supports both space-separated
+/// (`--extra-index-url {PH}`) and equals-attached (`--extra-index-url={PH}`) forms;
+/// split_whitespace() otherwise keeps the equals form as one token and would pass
+/// the placeholder to pip untouched (failing the install).
+fn expand_torch_placeholder(pip_args: &str, torch_url: &str) -> Vec<String> {
+    pip_args
+        .split_whitespace()
+        .map(|arg| {
+            if arg == PIP_TORCH_INDEX_URL_PLACEHOLDER {
+                torch_url.to_string()
+            } else if let Some(prefix) = arg.strip_suffix(PIP_TORCH_INDEX_URL_PLACEHOLDER) {
+                format!("{prefix}{torch_url}")
+            } else {
+                arg.to_string()
+            }
+        })
+        .collect()
+}
+
 #[cfg(target_os = "windows")]
 pub async fn install_requirements(
     app_name: &str,
@@ -573,16 +593,7 @@ pub async fn install_requirements(
         // Expand the torch-source placeholder ({PIP_TORCH_INDEX_URL}) into the
         // user-selected CUDA index URL (GPU variant). This keeps the mirror choice
         // in the user's hands while leaving the main --index-url untouched.
-        let expanded_args: Vec<String> = pip_args
-            .split_whitespace()
-            .map(|arg| {
-                if arg == PIP_TORCH_INDEX_URL_PLACEHOLDER {
-                    torch_index_url.clone()
-                } else {
-                    arg.to_string()
-                }
-            })
-            .collect();
+        let expanded_args = expand_torch_placeholder(pip_args, &torch_index_url);
         pip_install_cmd.args(&expanded_args);
     }
     if requirements.ends_with(".txt") {
@@ -728,4 +739,45 @@ pub fn clean_python_install(app_name: &str, path: &Path) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expands_space_separated_placeholder() {
+        let args = expand_torch_placeholder(
+            "--extra-index-url {PIP_TORCH_INDEX_URL}",
+            "https://mirror.nju.edu.cn/pytorch/whl/cu126",
+        );
+        assert_eq!(
+            args,
+            vec!["--extra-index-url", "https://mirror.nju.edu.cn/pytorch/whl/cu126"]
+        );
+    }
+
+    #[test]
+    fn expands_equals_attached_placeholder() {
+        let args = expand_torch_placeholder(
+            "--extra-index-url={PIP_TORCH_INDEX_URL}",
+            "https://download.pytorch.org/whl/cu126",
+        );
+        assert_eq!(
+            args,
+            vec!["--extra-index-url=https://download.pytorch.org/whl/cu126"]
+        );
+    }
+
+    #[test]
+    fn leaves_args_without_placeholder_untouched() {
+        let args = expand_torch_placeholder(
+            "--no-deps --index-url https://pypi.tuna.tsinghua.edu.cn/simple",
+            "https://download.pytorch.org/whl/cu126",
+        );
+        assert_eq!(
+            args,
+            vec!["--no-deps", "--index-url", "https://pypi.tuna.tsinghua.edu.cn/simple"]
+        );
+    }
 }

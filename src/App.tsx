@@ -52,7 +52,7 @@ import {alpha, createTheme, ThemeProvider} from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import {useTranslation} from 'react-i18next';
-import {invokeTauriCommandWrapper} from "./utils.ts";
+import {invokeTauriCommandWrapper, isGpuProfile} from "./utils.ts";
 
 interface Profile {
     name: string;
@@ -911,18 +911,21 @@ function App() {
                                 {profileChoiceApp.profiles.map(p => <MenuItem key={p.name} value={p.name}>{p.name}</MenuItem>)}
                             </Select>
                         </FormControl>
-                        {selectedProfileForInstall === 'gpu' && torchIndexConfig && torchIndexConfig.options && torchIndexConfig.options.length > 0 && (
-                            <FormControl fullWidth sx={{my: 2}}>
-                                <InputLabel id="torch-index-select-label">{t('Torch Source')}</InputLabel>
-                                <Select labelId="torch-index-select-label" value={selectedTorchIndex} label={t('Torch Source')} onChange={(e) => setSelectedTorchIndex(e.target.value)}>
-                                    {torchIndexConfig.options.map(o => <MenuItem key={String(o)} value={String(o)}>{getTorchIndexUrlName(String(o), t)}</MenuItem>)}
-                                </Select>
-                            </FormControl>
+                        {isGpuProfile(selectedProfileForInstall) && torchIndexConfig && torchIndexConfig.options && torchIndexConfig.options.length > 0 && (
+                            <>
+                                <FormControl fullWidth sx={{my: 2}}>
+                                    <InputLabel id="torch-index-select-label">{t('Torch Source')}</InputLabel>
+                                    <Select labelId="torch-index-select-label" value={selectedTorchIndex} label={t('Torch Source')} onChange={(e) => setSelectedTorchIndex(e.target.value)}>
+                                        {torchIndexConfig.options.map(o => <MenuItem key={String(o)} value={String(o)}>{getTorchIndexUrlName(String(o), t)}</MenuItem>)}
+                                    </Select>
+                                </FormControl>
+                                <Typography variant="caption" color="text.secondary" sx={{display: 'block', mt: -1}}>{t('Only applies to the next install or profile change.')}</Typography>
+                            </>
                         )}
                         <Stack direction="row" spacing={2} sx={{mt: 3, justifyContent: 'flex-end'}}>
                             <Button variant="outlined" onClick={() => setCurrentPage('list')}>{t('Cancel')}</Button>
                             <Button variant="contained" onClick={async () => {
-                                if (selectedProfileForInstall === 'gpu' && selectedTorchIndex) {
+                                if (isGpuProfile(selectedProfileForInstall) && selectedTorchIndex) {
                                     await invokeTauriCommandWrapper<void>('update_config_item', {name: 'Pip Torch Index URL', value: selectedTorchIndex}, () => {}, (errorMessage, rawError) => console.error(`Failed to save torch index: ${errorMessage}`, rawError));
                                 }
                                 handleInstallWithProfile(profileChoiceApp.name, selectedProfileForInstall);

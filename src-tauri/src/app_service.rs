@@ -904,22 +904,23 @@ fn get_profile_for_setup<'a>(
     match temp_app_config.get_profile(profile_name) {
         Some(profile) => Ok((profile, profile_name.to_string())),
         None => {
-            if profile_name != "default" {
-                warn!(
-                    "Profile '{}' not found for setup in app '{}'. Falling back to 'default' profile.",
-                    profile_name, app_name
-                );
-            }
-            let final_profile_name_to_set = "default".to_string();
-            let profile = temp_app_config.get_profile("default").ok_or_else(|| {
+            warn!(
+                "Profile '{}' not found for setup in app '{}'. Falling back to the first profile.",
+                profile_name, app_name
+            );
+            // get_profile() folds to profiles.first() when the name isn't found, so this
+            // resolves to the first (default) profile and uses its REAL name — never a
+            // hard-coded "default" that may not exist (e.g. profiles named cpu/gpu).
+            let fallback_profile = temp_app_config.get_profile(profile_name).ok_or_else(|| {
                 anyhow!(
-                    "Profile '{}' (and fallback 'default') not found in {} for app {}",
+                    "Profile '{}' not found (and no fallback profile) in {} for app {}",
                     profile_name,
                     YML_FILE_NAME,
                     app_name
                 )
             })?;
-            Ok((profile, final_profile_name_to_set))
+            let final_profile_name_to_set = fallback_profile.name.clone();
+            Ok((fallback_profile, final_profile_name_to_set))
         }
     }
 }
@@ -1304,14 +1305,13 @@ async fn update_to_version_inner(app_name: &str, version: &str) -> Result<(), Er
         let mut temp_app = read_embedded_app();
         temp_app.name = app_name.to_string();
         update_app_from_yml(&mut temp_app, &yml_path.to_string_lossy());
-        // Prefer the profile the user is currently on (e.g. GPU), falling back to
-        // "default". The old behavior hard-coded "default" here, which forced a CPU
-        // re-install on a GPU user while current_profile stayed "gpu".
+        // Prefer the profile the user is currently on (e.g. GPU). get_profile() folds to
+        // profiles.first() when the name isn't found, so a missing/invalid current_profile
+        // resolves to the first (default) profile rather than an empty spec. The old code
+        // hard-coded "default" here and in the folded get_profile callback, which broke
+        // projects whose first profile is not named "default" (e.g. cpu/gpu).
         let profile_name = current_profile.as_str();
-        match temp_app
-            .get_profile(profile_name)
-            .or_else(|| temp_app.get_profile("default"))
-        {
+        match temp_app.get_profile(profile_name) {
             Some(p) => (p.requirements.clone(), p.pip_args.clone()),
             None => (String::new(), String::new()),
         }

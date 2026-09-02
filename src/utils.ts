@@ -20,3 +20,8 @@ export async function invokeTauriCommandWrapper<T>(
         onError(errorMessage, err);
     }
 }
+
+// Decide whether a profile is a GPU/CUDA variant by name, so the torch-source picker
+// keeps working even if the GPU profile is later renamed (cuda / nvidia-gpu / ...).
+// Returns false for empty/undefined so it can be used against a maybe-null current_profile.
+export const isGpuProfile = (name?: string | null): boolean => !!name && /(gpu|cuda)/i.test(name);

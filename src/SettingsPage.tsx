@@ -16,7 +16,7 @@ import {
 import i18n from "i18next";
 import {useTranslation} from 'react-i18next';
 import {invoke} from "@tauri-apps/api/core";
-import {invokeTauriCommandWrapper} from "./utils.ts";
+import {invokeTauriCommandWrapper, isGpuProfile} from "./utils.ts";
 import {ThemeModeSetting} from "./App.tsx";
 
 interface StatusUpdateProps {
@@ -119,7 +119,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ currentTheme, onChangeTheme
     const pipTorchIndexConfig = getConfig(PIP_TORCH_INDEX_URL_CONFIG_KEY);
     // The PyTorch CUDA (cu126) source is only meaningful for the GPU variant;
     // show it only when the installed profile is GPU.
-    const showTorchPicker = !!pipTorchIndexConfig && currentProfile === 'gpu';
+    const showTorchPicker = !!pipTorchIndexConfig && isGpuProfile(currentProfile);
 
     return (
         <Container maxWidth="sm" sx={{py: 4}}>
@@ -130,8 +130,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ currentTheme, onChangeTheme
                     { label: t('Theme'), config: themeConfig, handler: (e: SelectChangeEvent) => onChangeTheme(e.target.value as ThemeModeSetting), renderOption: (o: string) => t(o.charAt(0).toUpperCase() + o.slice(1)) },
                     { label: t('Pip Cache Directory'), config: pipCacheConfig, handler: (e: SelectChangeEvent) => handleSettingChange(PIP_CACHE_DIR_CONFIG_KEY, e.target.value), renderOption: (o: string) => t(o) },
                     { label: t('Pip Index URL'), config: pipIndexUrlConfig, handler: (e: SelectChangeEvent) => handleSettingChange(PIP_INDEX_URL_CONFIG_KEY, e.target.value), renderOption: (o: string) => getPipIndexUrlName(o, t) },
-                    ...(showTorchPicker ? [{ label: t('Torch Source'), config: pipTorchIndexConfig, handler: (e: SelectChangeEvent) => handleSettingChange(PIP_TORCH_INDEX_URL_CONFIG_KEY, e.target.value), renderOption: (o: string) => getTorchIndexUrlName(o, t) }] : []),
-                ].map(({ label, config, handler, renderOption }) => config && (
+                    ...(showTorchPicker ? [{ label: t('Torch Source'), config: pipTorchIndexConfig, handler: (e: SelectChangeEvent) => handleSettingChange(PIP_TORCH_INDEX_URL_CONFIG_KEY, e.target.value), renderOption: (o: string) => getTorchIndexUrlName(o, t), helperText: t('Only applies to the next install or profile change.') }] : []),
+                ].map(({ label, config, handler, renderOption, helperText }) => config && (
                     <Box key={label} sx={{my: 2}}>
                         <FormControl fullWidth variant="outlined">
                             <InputLabel>{label}</InputLabel>
@@ -139,6 +139,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ currentTheme, onChangeTheme
                                 {(config.options as string[])?.map(o => <MenuItem key={o} value={o}>{renderOption(o)}</MenuItem>)}
                             </Select>
                         </FormControl>
+                        {helperText && (<Typography variant="caption" color="text.secondary" sx={{display: 'block', mt: 0.5}}>{helperText}</Typography>)}
                     </Box>
                 ))}
                 <Box sx={{mt: 4, display: 'flex', justifyContent: 'center'}}>
