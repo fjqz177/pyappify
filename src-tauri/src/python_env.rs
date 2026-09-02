@@ -24,6 +24,12 @@ use zip::ZipArchive;
 
 pub const PIP_UPDATE_NEEDED_MARKER: &str = ".pip_update_needed.tmp";
 
+// Placeholder a profile's pip_args may use for the GPU torch CUDA index URL;
+// install_requirements() expands it to the user-selected torch mirror. Kept as
+// a token (not a hardcoded URL) so CPU profiles that don't need torch stay
+// untouched and the user gets to choose the mirror.
+pub const PIP_TORCH_INDEX_URL_PLACEHOLDER: &str = "{PIP_TORCH_INDEX_URL}";
+
 const KNOWN_PATCHES: [(&str, &str, &str, &str); 7] = [
     ("3.13", "3.13.5", "https://www.python.org/ftp/python/3.13.5/python-3.13.5-amd64.zip", "https://mirrors.huaweicloud.com/python/3.13.5/python-3.13.5-amd64.zip"),
     ("3.12", "3.12.10", "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.zip", "https://mirrors.huaweicloud.com/python/3.12.10/python-3.12.10-amd64.zip"),
@@ -531,11 +537,12 @@ pub async fn install_requirements(
     let config_state = GLOBAL_CONFIG_STATE.get().ok_or_else(|| {
         anyhow!("GLOBAL_CONFIG_STATE not initialized. Call init_config_manager first.")
     })?;
-    let (pip_cache_dir, pip_index_url) = {
+    let (pip_cache_dir, pip_index_url, torch_index_url) = {
         let config = config_state.lock().unwrap();
         let cache_dir = config.get_effective_pip_cache_dir();
         let index_url = config.get_effective_pip_index_url();
-        (cache_dir, index_url)
+        let torch_url = config.get_effective_torch_index_url();
+        (cache_dir, index_url, torch_url)
     };
     let pip_install_desc = if requirements.ends_with(".txt") {
         let requirements_path = project_dir.join(requirements);
@@ -563,7 +570,20 @@ pub async fn install_requirements(
         {
             use_config_index_url = false;
         }
-        pip_install_cmd.args(pip_args.split_whitespace());
+        // Expand the torch-source placeholder ({PIP_TORCH_INDEX_URL}) into the
+        // user-selected CUDA index URL (GPU variant). This keeps the mirror choice
+        // in the user's hands while leaving the main --index-url untouched.
+        let expanded_args: Vec<String> = pip_args
+            .split_whitespace()
+            .map(|arg| {
+                if arg == PIP_TORCH_INDEX_URL_PLACEHOLDER {
+                    torch_index_url.clone()
+                } else {
+                    arg.to_string()
+                }
+            })
+            .collect();
+        pip_install_cmd.args(&expanded_args);
     }
     if requirements.ends_with(".txt") {
         let requirements_path = project_dir.join(requirements);

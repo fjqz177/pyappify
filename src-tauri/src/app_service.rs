@@ -1207,14 +1207,15 @@ async fn ensure_app_stopped_for_update(app_name: &str) -> Result<(), Error> {
 async fn update_to_version_inner(app_name: &str, version: &str) -> Result<(), Error> {
     let working_dir_path = get_app_working_dir_path(app_name);
 
-    let (previous_version, old_requirements_spec) = {
+    let (previous_version, old_requirements_spec, current_profile) = {
         let app_guard = APP.lock().await;
         match app_guard.as_ref().filter(|app| app.name == app_name) {
             Some(app) => (
                 app.current_version.clone(),
                 app.get_current_profile_settings().requirements.clone(),
+                app.current_profile.clone(),
             ),
-            None => (None, String::new()),
+            None => (None, String::new(), None),
         }
     };
 
@@ -1303,7 +1304,14 @@ async fn update_to_version_inner(app_name: &str, version: &str) -> Result<(), Er
         let mut temp_app = read_embedded_app();
         temp_app.name = app_name.to_string();
         update_app_from_yml(&mut temp_app, &yml_path.to_string_lossy());
-        match temp_app.get_profile("default") {
+        // Prefer the profile the user is currently on (e.g. GPU), falling back to
+        // "default". The old behavior hard-coded "default" here, which forced a CPU
+        // re-install on a GPU user while current_profile stayed "gpu".
+        let profile_name = current_profile.as_deref().unwrap_or("default");
+        match temp_app
+            .get_profile(profile_name)
+            .or_else(|| temp_app.get_profile("default"))
+        {
             Some(p) => (p.requirements.clone(), p.pip_args.clone()),
             None => (String::new(), String::new()),
         }

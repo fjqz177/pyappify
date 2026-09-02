@@ -165,6 +165,15 @@ const UPDATE_METHOD_OPTIONS = [
     'AUTO_UPDATE_PRE_RELEASE',
 ] as const;
 
+// Display name for a PyTorch CUDA (cu126) index URL, shown in the GPU variant
+// profile-chooser / settings picker.
+const getTorchIndexUrlName = (url: string, t: (key: string) => string) => {
+    if (url === '') return t('System Default');
+    if (url.includes('pytorch.org')) return t('Official PyTorch');
+    if (url.includes('nju.edu.cn')) return t('NJU Mirror');
+    return url;
+};
+
 type Page =
     'list'
     | 'installConsole'
@@ -279,6 +288,8 @@ function App() {
     const [selectedProfileForInstall, setSelectedProfileForInstall] = useState<string>("");
     const [appForProfileChange, setAppForProfileChange] = useState<App | null>(null);
     const [selectedNewProfileName, setSelectedNewProfileName] = useState<string>("");
+    const [torchIndexConfig, setTorchIndexConfig] = useState<{ name: string; value: string | number | boolean; options?: (string | number | boolean)[] } | null>(null);
+    const [selectedTorchIndex, setSelectedTorchIndex] = useState<string>("");
     const [isProfileChangeProcessRunning, setIsProfileChangeProcessRunning] = useState<boolean>(false);
     const [profileChangeData, setProfileChangeData] = useState<{ appName: string; newProfile: string } | null>(null);
     const [isConfirmDeleteDialogOpen, setConfirmDeleteDialogOpen] = useState(false);
@@ -829,6 +840,21 @@ function App() {
         if (!status.info && !status.error) setSnackbarOpen(false);
     }, [status.info, status.error, status.messageLoading, updateStatus, currentPage]);
 
+    // When the profile chooser is open, load the torch-source (cu126) config so
+    // a GPU selection can also pick the mirror to install torch/torchaudio from.
+    useEffect(() => {
+        if (currentPage !== 'profileChooser' || !profileChoiceApp) return;
+        invoke<{ name: string; value: string | number | boolean; options?: (string | number | boolean)[] }[]>('get_config_payload')
+            .then(cfgs => {
+                const torch = cfgs.find(c => c.name === 'Pip Torch Index URL');
+                if (torch) {
+                    setTorchIndexConfig(torch);
+                    setSelectedTorchIndex(String(torch.value) || String(torch.options?.[0] ?? ''));
+                }
+            })
+            .catch(err => console.error('Failed to load torch index config:', err));
+    }, [currentPage, profileChoiceApp]);
+
     const handleCheckForUpdates = async (appName: string) => {
         clearMessages();
         setAppActionLoading(prev => ({...prev, [appName]: true}));
@@ -872,7 +898,7 @@ function App() {
     } else if (currentPage === 'profileChangeConsole' && profileChangeData && startingAppName) {
         pageContent = <ConsolePage title={t("Changing Profile: {{appName}} to '{{newProfile}}'", { appName: profileChangeData.appName, newProfile: profileChangeData.newProfile })} appName={startingAppName} logs={consoleLogs[startingAppName] ?? []} onBack={handleBackFromConsole} isProcessing={isProfileChangeProcessRunning}/>;
     } else if (currentPage === 'settings') {
-        pageContent = <SettingsPage currentTheme={themeMode} onChangeTheme={setThemeMode} onBack={() => setCurrentPage('list')} updateStatus={updateStatus} clearMessages={clearMessages} />;
+        pageContent = <SettingsPage currentTheme={themeMode} onChangeTheme={setThemeMode} onBack={() => setCurrentPage('list')} updateStatus={updateStatus} clearMessages={clearMessages} currentProfile={app?.current_profile ?? null} />;
     } else if (currentPage === 'profileChooser' && profileChoiceApp) {
         pageContent = (
             <Container maxWidth="sm" sx={{py: 4}}>
@@ -885,9 +911,22 @@ function App() {
                                 {profileChoiceApp.profiles.map(p => <MenuItem key={p.name} value={p.name}>{p.name}</MenuItem>)}
                             </Select>
                         </FormControl>
+                        {selectedProfileForInstall === 'gpu' && torchIndexConfig && torchIndexConfig.options && torchIndexConfig.options.length > 0 && (
+                            <FormControl fullWidth sx={{my: 2}}>
+                                <InputLabel id="torch-index-select-label">{t('Torch Source')}</InputLabel>
+                                <Select labelId="torch-index-select-label" value={selectedTorchIndex} label={t('Torch Source')} onChange={(e) => setSelectedTorchIndex(e.target.value)}>
+                                    {torchIndexConfig.options.map(o => <MenuItem key={o} value={o}>{getTorchIndexUrlName(String(o), t)}</MenuItem>)}
+                                </Select>
+                            </FormControl>
+                        )}
                         <Stack direction="row" spacing={2} sx={{mt: 3, justifyContent: 'flex-end'}}>
                             <Button variant="outlined" onClick={() => setCurrentPage('list')}>{t('Cancel')}</Button>
-                            <Button variant="contained" onClick={() => handleInstallWithProfile(profileChoiceApp.name, selectedProfileForInstall)} disabled={!selectedProfileForInstall || appActionLoading[profileChoiceApp.name]}>
+                            <Button variant="contained" onClick={async () => {
+                                if (selectedProfileForInstall === 'gpu' && selectedTorchIndex) {
+                                    await invokeTauriCommandWrapper<void>('update_config_item', {name: 'Pip Torch Index URL', value: selectedTorchIndex}, () => {}, (errorMessage, rawError) => console.error(`Failed to save torch index: ${errorMessage}`, rawError));
+                                }
+                                handleInstallWithProfile(profileChoiceApp.name, selectedProfileForInstall);
+                            }} disabled={!selectedProfileForInstall || appActionLoading[profileChoiceApp.name]}>
                                 {appActionLoading[profileChoiceApp.name] ? t("Starting Install...") : t("Confirm & Install")}
                             </Button>
                         </Stack>

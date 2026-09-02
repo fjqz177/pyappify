@@ -27,6 +27,15 @@ const PIP_INDEX_URL_OPTION_USTC: &str = "https://mirrors.ustc.edu.cn/pypi/simple
 const PIP_INDEX_URL_OPTION_HUAWEI: &str = "https://repo.huaweicloud.com/repository/pypi/simple/";
 const PIP_INDEX_URL_OPTION_TENCENT: &str = "https://mirrors.cloud.tencent.com/pypi/simple/";
 
+// Torch CUDA-wheel index (GPU variant only). Unlike the main package index, a
+// torch index only makes sense for the GPU profile, so the front-end gates this
+// setting on the selected/current variant. install_requirements() expands a
+// {PIP_TORCH_INDEX_URL} placeholder in the profile's pip_args from this value;
+// it must always resolve to a URL (defaulting to the official one).
+const PIP_TORCH_INDEX_URL_CONFIG_KEY: &str = "Pip Torch Index URL";
+const PIP_TORCH_INDEX_URL_OPTION_OFFICIAL: &str = "https://download.pytorch.org/whl/cu126";
+const PIP_TORCH_INDEX_URL_OPTION_NJU: &str = "https://mirror.nju.edu.cn/pytorch/whl/cu126";
+
 // Read only for the one-time migration to per-app preferences.
 const LEGACY_UPDATE_METHOD_CONFIG_KEY: &str = "Update Method";
 const LEGACY_AUTO_START_CONFIG_KEY: &str = "Auto Start";
@@ -220,6 +229,20 @@ impl AppConfig {
                     ConfigValue::String(PIP_INDEX_URL_OPTION_USTC.to_string()),
                     ConfigValue::String(PIP_INDEX_URL_OPTION_HUAWEI.to_string()),
                     ConfigValue::String(PIP_INDEX_URL_OPTION_TENCENT.to_string()),
+                ]),
+            },
+        );
+
+        items.insert(
+            PIP_TORCH_INDEX_URL_CONFIG_KEY.to_string(),
+            ConfigItem {
+                name: PIP_TORCH_INDEX_URL_CONFIG_KEY.to_string(),
+                description: "Specifies the pip index URL used to install PyTorch CUDA (cu126) wheels for the GPU variant. Only used when a profile requests a torch source (GPU).".to_string(),
+                value: ConfigValue::String(PIP_TORCH_INDEX_URL_OPTION_OFFICIAL.to_string()),
+                default_value: ConfigValue::String(PIP_TORCH_INDEX_URL_OPTION_OFFICIAL.to_string()),
+                options: Some(vec![
+                    ConfigValue::String(PIP_TORCH_INDEX_URL_OPTION_OFFICIAL.to_string()),
+                    ConfigValue::String(PIP_TORCH_INDEX_URL_OPTION_NJU.to_string()),
                 ]),
             },
         );
@@ -516,6 +539,13 @@ impl AppConfig {
                 );
                 None
             }
+        }
+    }
+
+    pub fn get_effective_torch_index_url(&self) -> String {
+        match self.get_item_value(PIP_TORCH_INDEX_URL_CONFIG_KEY) {
+            Some(ConfigValue::String(value)) if !value.is_empty() => value,
+            _ => PIP_TORCH_INDEX_URL_OPTION_OFFICIAL.to_string(),
         }
     }
 
