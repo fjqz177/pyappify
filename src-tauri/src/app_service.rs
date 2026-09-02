@@ -1215,7 +1215,7 @@ async fn update_to_version_inner(app_name: &str, version: &str) -> Result<(), Er
                 app.get_current_profile_settings().requirements.clone(),
                 app.current_profile.clone(),
             ),
-            None => (None, String::new(), None),
+            None => (None, String::new(), String::new()),
         }
     };
 
@@ -1307,7 +1307,7 @@ async fn update_to_version_inner(app_name: &str, version: &str) -> Result<(), Er
         // Prefer the profile the user is currently on (e.g. GPU), falling back to
         // "default". The old behavior hard-coded "default" here, which forced a CPU
         // re-install on a GPU user while current_profile stayed "gpu".
-        let profile_name = current_profile.as_deref().unwrap_or("default");
+        let profile_name = current_profile.as_str();
         match temp_app
             .get_profile(profile_name)
             .or_else(|| temp_app.get_profile("default"))
