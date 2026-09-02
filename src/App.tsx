@@ -915,7 +915,7 @@ function App() {
                             <FormControl fullWidth sx={{my: 2}}>
                                 <InputLabel id="torch-index-select-label">{t('Torch Source')}</InputLabel>
                                 <Select labelId="torch-index-select-label" value={selectedTorchIndex} label={t('Torch Source')} onChange={(e) => setSelectedTorchIndex(e.target.value)}>
-                                    {torchIndexConfig.options.map(o => <MenuItem key={o} value={o}>{getTorchIndexUrlName(String(o), t)}</MenuItem>)}
+                                    {torchIndexConfig.options.map(o => <MenuItem key={String(o)} value={String(o)}>{getTorchIndexUrlName(String(o), t)}</MenuItem>)}
                                 </Select>
                             </FormControl>
                         )}
