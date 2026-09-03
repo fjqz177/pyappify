@@ -15,6 +15,14 @@ use tracing::{error, info, warn};
 const PIP_CACHE_DIR_CONFIG_KEY: &str = "Pip Cache Directory";
 const PIP_CACHE_DIR_OPTION_APP_INSTALL: &str = "App Install Directory";
 const PIP_CACHE_DIR_OPTION_SYSTEM_DEFAULT: &str = "System Default";
+// Python distribution source for uv-managed runtimes. Empty = uv's built-in
+// default (astral python-build-standalone on GitHub). A custom URL (including
+// `file://` mirrors) can be supplied by editing app_config.json; the picker
+// exposes the official URL for now.
+const PYTHON_SOURCE_CONFIG_KEY: &str = "Python Source";
+const PYTHON_SOURCE_OPTION_UV_DEFAULT: &str = "";
+const PYTHON_SOURCE_OPTION_GITHUB: &str = "https://github.com/astral-sh/python-build-standalone";
+
 const PIP_INDEX_URL_CONFIG_KEY: &str = "Pip Index URL";
 const PIP_INDEX_URL_OPTION_SYSTEM_DEFAULT: &str = "";
 const PIP_INDEX_URL_OPTION_PYPI: &str = "https://pypi.org/simple/";
@@ -217,6 +225,20 @@ impl AppConfig {
                 options: Some(vec![
                     ConfigValue::String(PIP_TORCH_INDEX_URL_OPTION_OFFICIAL.to_string()),
                     ConfigValue::String(PIP_TORCH_INDEX_URL_OPTION_NJU.to_string()),
+                ]),
+            },
+        );
+
+        items.insert(
+            PYTHON_SOURCE_CONFIG_KEY.to_string(),
+            ConfigItem {
+                name: PYTHON_SOURCE_CONFIG_KEY.to_string(),
+                description: "Source for uv-managed Python distributions. Empty uses uv's default (astral python-build-standalone); a mirror or a local file:// URL can be set in app_config.json.".to_string(),
+                value: ConfigValue::String(PYTHON_SOURCE_OPTION_UV_DEFAULT.to_string()),
+                default_value: ConfigValue::String(PYTHON_SOURCE_OPTION_UV_DEFAULT.to_string()),
+                options: Some(vec![
+                    ConfigValue::String(PYTHON_SOURCE_OPTION_UV_DEFAULT.to_string()),
+                    ConfigValue::String(PYTHON_SOURCE_OPTION_GITHUB.to_string()),
                 ]),
             },
         );
@@ -520,6 +542,13 @@ impl AppConfig {
         match self.get_item_value(PIP_TORCH_INDEX_URL_CONFIG_KEY) {
             Some(ConfigValue::String(value)) if !value.is_empty() => value,
             _ => PIP_TORCH_INDEX_URL_OPTION_OFFICIAL.to_string(),
+        }
+    }
+
+    pub fn get_effective_python_source(&self) -> Option<String> {
+        match self.get_item_value(PYTHON_SOURCE_CONFIG_KEY) {
+            Some(ConfigValue::String(value)) if !value.is_empty() => Some(value),
+            _ => None,
         }
     }
 

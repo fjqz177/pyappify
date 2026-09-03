@@ -14,9 +14,9 @@ use crate::app::{
     UPDATE_METHOD_OPTION_AUTO, UPDATE_METHOD_OPTION_AUTO_PRE_RELEASE, UPDATE_METHOD_OPTION_MANUAL,
 };
 use crate::app_service::{
-    delete_app, get_app_icon, get_update_notes, get_version_list, load_app, set_startup_overrides,
-    setup_app, start_app, stop_app, update_app_preferences, update_to_version, StartupOverrides,
-    AUTO_START_CHECKED,
+    delete_app, get_app_icon, get_update_notes, get_version_list, load_app, rebuild_environment,
+    set_startup_overrides, setup_app, start_app, stop_app, update_app_preferences,
+    update_to_version, StartupOverrides, AUTO_START_CHECKED,
 };
 use crate::config_manager::{
     get_config_payload, init_config_manager, save_configuration, update_config_item,
@@ -27,6 +27,7 @@ use crate::utils::window;
 use crate::utils::window::{
     on_window_event, open_logs_directory, send_notification_cmd,
 };
+use crate::utils::command::cancel_current_operation;
 use std::{env, path::PathBuf};
 use tauri::Manager;
 use tracing::{error, info};
@@ -469,6 +470,17 @@ async fn show_main_window(window: tauri::Window) {
     window.set_focus().unwrap();
 }
 
+/// Kill the running environment operation (uv install / sync) and mark the
+/// current run as cancelled. Callable from the console page's "Stop" button.
+#[tauri::command]
+fn cancel_app_operation() -> Result<(), crate::utils::error::Error> {
+    if cancel_current_operation() {
+        Ok(())
+    } else {
+        Err(crate::err!("No environment operation is currently running."))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub async fn run() {
     let command_line_args = env::args().collect::<Vec<_>>();
@@ -701,6 +713,8 @@ pub async fn run() {
                 add_defender_exclusion,
                 send_notification_cmd,
                 open_logs_directory,
+                rebuild_environment,
+                cancel_app_operation,
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");

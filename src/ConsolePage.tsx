@@ -93,6 +93,10 @@ const ConsolePage: React.FC<ConsolePageProps> = ({
         invoke('open_logs_directory').catch(err => console.error('Failed to open logs directory:', err));
     };
 
+    const handleCancelOperation = () => {
+        invoke('cancel_app_operation').catch(err => console.error('Failed to cancel operation:', err));
+    };
+
     useEffect(() => {
         if (consoleBodyRef.current) {
             consoleBodyRef.current.scrollTop = consoleBodyRef.current.scrollHeight;
@@ -224,6 +228,11 @@ const ConsolePage: React.FC<ConsolePageProps> = ({
 
             <Box sx={{pt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2}}>
                 <Stack direction="row" spacing={1}>
+                    {internalIsProcessing && (
+                        <Button variant="outlined" color="warning" size="small" onClick={handleCancelOperation}>
+                            {t('Stop')}
+                        </Button>
+                    )}
                     <Button variant="outlined" size="small" onClick={handleCopyLogs} disabled={logs.length === 0}>
                         {copied ? t('Copied!') : t('Copy Logs')}
                     </Button>

@@ -1,12 +1,49 @@
 // src/command.rs
 use crate::utils::error::Error;
 use crate::{emit_error, emit_info, ensure_some, err};
+use once_cell::sync::Lazy;
 use std::ffi::OsStr;
-use std::process::{ExitStatus, Stdio};
+use std::process::ExitStatus;
+use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
 use tracing::{debug, error, info};
 use windows_sys::Win32::UI::Shell::IsUserAnAdmin;
+
+/// PID of the currently running environment operation (uv python install /
+/// uv pip install). Only one runs at a time (app dir lock serializes them).
+static CURRENT_OPERATION_PID: Lazy<Mutex<Option<u32>>> = Lazy::new(|| Mutex::new(None));
+static OPERATION_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// Kill the running environment operation (whole process tree) and mark the
+/// current run as cancelled. Returns false when nothing is running.
+pub fn cancel_current_operation() -> bool {
+    let pid = match CURRENT_OPERATION_PID.lock().unwrap().take() {
+        Some(pid) => pid,
+        None => return false,
+    };
+    OPERATION_CANCELLED.store(true, Ordering::SeqCst);
+    info!("Cancelling operation with pid {}", pid);
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .status();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status();
+    }
+    true
+}
+
+fn is_operation_cancelled() -> bool {
+    OPERATION_CANCELLED.swap(false, Ordering::SeqCst)
+}
 
 pub async fn run_command_and_stream_output(
     mut command: Command,
@@ -30,10 +67,15 @@ pub async fn run_command_and_stream_output(
         err!(msg)
     })?;
 
-    let child_pid = child
+    let child_pid_obj = child
         .id()
-        .map(|id| id.to_string())
-        .unwrap_or_else(|| "N/A".to_string());
+        .ok_or_else(|| err!("Failed to get spawned command pid"))?;
+    let child_pid = child_pid_obj.to_string();
+    {
+        // Only one environment operation at a time; replace any stale entry.
+        *CURRENT_OPERATION_PID.lock().unwrap() = Some(child_pid_obj);
+        OPERATION_CANCELLED.store(false, Ordering::SeqCst);
+    }
     info!(pid = %child_pid, cmd_desc = %command_description, "Command spawned");
 
     let stdout = ensure_some!(
@@ -105,8 +147,23 @@ pub async fn run_command_and_stream_output(
 
     let status = child.wait().await?;
 
+    {
+        let mut guard = CURRENT_OPERATION_PID.lock().unwrap();
+        if guard.as_ref() == Some(&child_pid_obj) {
+            *guard = None;
+        }
+    }
+
     if let Err(e) = tokio::try_join!(stdout_task, stderr_task) {
         error!(error = %e, cmd_desc = %command_description, "Log reading task encountered an error. This does not necessarily mean the command itself failed.");
+    }
+
+    if is_operation_cancelled() {
+        emit_info!(
+            app_name,
+            "Operation cancelled by the user. The environment will be completed (idempotently) on the next start."
+        );
+        return Err(err!("Operation cancelled by the user."));
     }
 
     if !status.success() {

@@ -817,6 +817,57 @@ pub async fn delete_app(app_name: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Wipe the uv-managed Python runtime and reinstall it from the current
+/// profile declarations (uv python install + uv pip install). One-click repair
+/// for corrupted envs; the cache directory is preserved for speed.
+#[tauri::command]
+pub async fn rebuild_environment(app_name: String) -> Result<(), Error> {
+    info!("Rebuilding environment for '{}'.", app_name);
+    let app_dir_lock = get_app_lock(&app_name).await?;
+    let _guard = app_dir_lock.lock().await;
+
+    let app = get_app_by_name(&app_name).await?;
+    if app.running {
+        return Err(err!(
+            "Stop '{}' before rebuilding its environment.",
+            app_name
+        ));
+    }
+    let profile = app.get_current_profile_settings().clone();
+    let working_dir = get_app_working_dir_path(&app_name);
+    let python_root = get_python_dir(&app_name);
+
+    emit_info!(
+        &app_name,
+        "Rebuilding environment: removing uv-managed Python '{}' and reinstalling from profile declarations.",
+        python_root.display()
+    );
+    if python_root.exists() {
+        tokio::fs::remove_dir_all(&python_root).await?;
+    }
+    tokio::fs::create_dir_all(&python_root).await?;
+
+    python_env::setup_python_env(app_name.clone(), &profile.requires_python).await?;
+    if !profile.requirements.is_empty() {
+        python_env::install_requirements(
+            &app_name,
+            &profile.requirements,
+            &working_dir,
+            &profile.pip_args,
+        )
+        .await?;
+    }
+    let fingerprint = compute_env_fingerprint(
+        &working_dir,
+        &profile.requirements,
+        &profile.pip_args,
+        &profile.requires_python,
+    );
+    save_env_state(&app_name, "uv", Some(fingerprint)).await?;
+    emit_info!(&app_name, "Environment rebuilt successfully.");
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn update_app_preferences(
     app_name: String,

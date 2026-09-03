@@ -45,6 +45,7 @@ import {
     KeyboardArrowRight,
     OpenInNew,
     PlayArrow,
+    RestartAlt,
     Settings as SettingsIcon,
     StopCircle,
 } from '@mui/icons-material';
@@ -191,7 +192,7 @@ type InlineUpdateLogState = {
     failed?: boolean;
 };
 
-type InlineConsoleKind = 'start' | 'update';
+type InlineConsoleKind = 'start' | 'update' | 'rebuild';
 
 const MAX_CONSOLE_LOGS = 500;
 const CONSOLE_LOG_STORAGE_KEY = 'pyappifyConsoleLogs';
@@ -719,6 +720,22 @@ function App() {
         );
     };
 
+    const handleRebuildEnvironment = async (appName: string) => {
+        clearMessages();
+        setAppActionLoading(prev => ({...prev, [appName]: true}));
+        setStartingAppName(appName);
+        beginConsoleSession(appName, `Rebuilding environment for '${appName}'...`);
+        setInlineConsoles(prev => ({...prev, [appName]: 'rebuild'}));
+
+        await invokeTauriCommandWrapper<void>("rebuild_environment", {appName}, () => {},
+            (errorMessage, rawError) => {
+                console.error(`Failed to rebuild environment for ${appName}:`, rawError);
+                addConsoleLog({message: `ERROR: ${errorMessage}`, app_name: appName, error: true, finished: true});
+                setAppActionLoading(prev => ({...prev, [appName]: false}));
+            }
+        );
+    };
+
     const handleOpenRunningAppConsole = (appName: string) => {
         clearMessages();
         setStartingAppName(appName);
@@ -1135,6 +1152,7 @@ function App() {
                                                 )}
                                                 {app.show_add_defender && !hiddenDefenderButtons.has(app.name) && <Button variant="outlined" color="secondary" size="small" startIcon={isThisAppLoading && addingDefenderExclusionForApp === app.name ? <CircularProgress size={16}/> : <Build/>} onClick={() => handleAddDefenderExclusion(app.name)} disabled={disableRowActions}>{t("Add Defender Exclusion")}</Button>}
                                                 {app.installed && !app.running && app.profiles?.length > 1 && <Button variant="outlined" color="secondary" size="small" startIcon={isThisAppLoading ? <CircularProgress size={16}/> : <Cached/>} onClick={() => handleNavigateToChangeProfilePage(app)} disabled={disableRowActions}>{t("Change Profile")}</Button>}
+                                                {app.installed && !app.running && <Button variant="outlined" color="secondary" size="small" startIcon={isThisAppLoading ? <CircularProgress size={16}/> : <RestartAlt/>} onClick={() => handleRebuildEnvironment(app.name)} disabled={disableRowActions}>{t("Rebuild Environment")}</Button>}
                                                 {app.installed && (
                                                     <Tooltip title={t('Delete')}>
                                                         <span>
@@ -1211,7 +1229,9 @@ function App() {
                                                         inline
                                                         title={inlineConsoleKind === 'start'
                                                             ? t('Starting App: {{appName}}', {appName: app.name})
-                                                            : t('{{actionType}} App: {{appName}}', {actionType: t(inlineUpdateAction), appName: app.name})}
+                                                            : inlineConsoleKind === 'rebuild'
+                                                                ? t('Rebuilding Environment: {{appName}}', {appName: app.name})
+                                                                : t('{{actionType}} App: {{appName}}', {actionType: t(inlineUpdateAction), appName: app.name})}
                                                         appName={app.name}
                                                         logs={consoleLogs[app.name] ?? []}
                                                         onBack={() => handleCloseInlineConsole(app.name)}
