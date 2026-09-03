@@ -2022,6 +2022,108 @@ pub async fn watch_app_config_changes() {
     }
 }
 
+// The startup auto-update check in load_app() runs once per launcher launch. A
+// launcher left in the tray would therefore never notice a new release, so a
+// periodic check (6h) keeps auto-update meaningful for long-running sessions.
+// Re-notifying the same target is deduplicated via LAST_UPDATE_NOTIFIED.
+static LAST_UPDATE_NOTIFIED: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+
+pub async fn periodically_check_for_auto_update() {
+    let mut ticker = interval(Duration::from_secs(6 * 60 * 60));
+    ticker.tick().await; // first tick fires immediately; load_app() already checked at startup
+    loop {
+        ticker.tick().await;
+        if let Err(error) = check_and_apply_auto_update().await {
+            warn!("Periodic auto-update check failed: {}", error);
+        }
+    }
+}
+
+async fn check_and_apply_auto_update() -> Result<(), Error> {
+    {
+        let app_guard = APP.lock().await;
+        let Some(current) = app_guard.as_ref() else {
+            return Ok(());
+        };
+        if !current.installed
+            || current.available_versions.is_empty()
+            || current.update_state != AppUpdateState::Idle
+        {
+            return Ok(());
+        }
+    }
+    let app_name = {
+        let app_guard = APP.lock().await;
+        app_guard
+            .as_ref()
+            .map(|app| app.name.clone())
+            .unwrap_or_default()
+    };
+    if app_name.is_empty() {
+        return Ok(());
+    }
+
+    // Serialize with load_app() so the initial git fetch and state writes do not race.
+    let _load_guard = APP_LOAD_LOCK.lock().await;
+    update_app_from_disk().await?;
+
+    let app = get_app().await.ok_or_else(|| err!("App is not loaded."))?;
+    let Some(latest) = get_update_target(&app.available_versions, app.effective_update_method())
+        .cloned()
+    else {
+        return Ok(());
+    };
+    let update_available = app.current_version_missing
+        || app.current_version.as_ref().is_some_and(|current_version| {
+            git::compare_version_tags(&latest, current_version) == Some(Ordering::Greater)
+        });
+    if !update_available {
+        return Ok(());
+    }
+
+    // Never re-announce the same target on every tick.
+    {
+        let mut last_notified = LAST_UPDATE_NOTIFIED.lock().await;
+        if last_notified.as_deref() == Some(latest.as_str()) {
+            return Ok(());
+        }
+        *last_notified = Some(latest.clone());
+    }
+
+    if app.running {
+        send_notification(app.name.clone(), t!("message.new_version", version = latest.clone()));
+        return Ok(());
+    }
+
+    let auto_update = matches!(
+        app.effective_update_method(),
+        UPDATE_METHOD_OPTION_AUTO | UPDATE_METHOD_OPTION_AUTO_PRE_RELEASE
+    );
+    if !auto_update {
+        send_notification(app.name.clone(), t!("message.new_version", version = latest));
+        return Ok(());
+    }
+
+    send_notification(
+        app.name.clone(),
+        t!("message.new_version_update", version = latest.clone()),
+    );
+    match update_to_version(&app.name, &latest).await {
+        Ok(()) => {
+            send_notification(
+                app.name.clone(),
+                t!("message.version_update_success", version = latest),
+            );
+            Ok(())
+        }
+        Err(error) => {
+            // Keep the failure quiet for one cycle but allow a retry on the next tick.
+            *LAST_UPDATE_NOTIFIED.lock().await = None;
+            Err(error)
+        }
+    }
+}
+
 pub async fn periodically_update_app_running_status(app_handle: AppHandle) {
     let mut ticker = interval(Duration::from_secs(2));
     info!("Starting periodic app status update (2s interval).");

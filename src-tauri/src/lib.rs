@@ -24,7 +24,9 @@ use crate::config_manager::{
 use crate::utils::defender::add_defender_exclusion;
 use crate::utils::logger::LoggerBuilder;
 use crate::utils::window;
-use crate::utils::window::{on_window_event, send_notification_cmd};
+use crate::utils::window::{
+    on_window_event, open_logs_directory, send_notification_cmd,
+};
 use std::{env, path::PathBuf};
 use tauri::Manager;
 use tracing::{error, info};
@@ -676,6 +678,7 @@ pub async fn run() {
                     app_handle.clone(),
                 ));
                 tokio::spawn(app_service::watch_app_config_changes());
+                tokio::spawn(app_service::periodically_check_for_auto_update());
                 if let Some(options) = initial_request {
                     tauri::async_runtime::spawn(handle_forwarded_request(options));
                 }
@@ -697,6 +700,7 @@ pub async fn run() {
                 get_config_payload,
                 add_defender_exclusion,
                 send_notification_cmd,
+                open_logs_directory,
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");

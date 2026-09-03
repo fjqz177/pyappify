@@ -1,4 +1,5 @@
 // src/utils/window.rs
+use crate::app_service;
 use crate::emitter::get_app_handle;
 use crate::utils::error::Error;
 use crate::utils::path::get_start_dir;
@@ -9,7 +10,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Manager, WebviewWindow, Window, WindowEvent, Wry};
 use tauri_plugin_notification::NotificationExt;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub fn on_window_event(window: &Window, _event: &WindowEvent) {
     if let WindowEvent::Resized(size) = _event {
@@ -41,14 +42,36 @@ pub fn send_notification_cmd(title: String, body: String) {
 }
 
 pub fn create_system_tray(app: &App<Wry>) -> anyhow::Result<()> {
-    let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&quit_i])?;
+    let open_i = MenuItem::with_id(app, "tray_open", t!("message.tray_open"), true, None::<&str>)?;
+    let start_i =
+        MenuItem::with_id(app, "tray_start_app", t!("message.tray_start_app"), true, None::<&str>)?;
+    let stop_i =
+        MenuItem::with_id(app, "tray_stop_app", t!("message.tray_stop_app"), true, None::<&str>)?;
+    let quit_i = MenuItem::with_id(app, "quit", t!("message.tray_quit"), true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open_i, &start_i, &stop_i, &quit_i])?;
 
     let _tray = TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        // Left click raises the launcher window (handled below); the menu stays
+        // right-click only, so the two behaviors no longer race.
+        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray_open" | "tray_start_app" | "tray_stop_app" => {
+                let action = event.id.as_ref().to_string();
+                let app_handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(app_error) = handle_tray_action(&app_handle, &action).await {
+                        warn!("Tray action '{}' failed: {}", action, app_error);
+                        if let Some(current_app) = app_service::get_app().await {
+                            send_notification(
+                                current_app.name.clone(),
+                                format!("Tray action failed: {}", app_error),
+                            );
+                        }
+                    }
+                });
+            }
             "quit" => {
                 println!("quit menu item was clicked");
                 app.exit(0);
@@ -88,6 +111,59 @@ fn show_window(window: WebviewWindow) {
     window.unminimize().unwrap();
     window.show().unwrap();
     window.set_focus().unwrap();
+}
+
+// Tray menu actions delegate to the app service and re-check the live state,
+// so the items are never stale even though the tray menu is built once.
+async fn handle_tray_action(app: &AppHandle<Wry>, action: &str) -> Result<(), Error> {
+    match action {
+        "tray_open" => {
+            show_and_focus_main_window(app);
+            Ok(())
+        }
+        "tray_start_app" => match app_service::get_app().await {
+            Some(current_app) if current_app.installed && !current_app.running => {
+                app_service::start_app(app.clone(), current_app.name.clone()).await
+            }
+            _ => {
+                // Not installed, or already running: raise the window so the
+                // user sees the current state instead of guessing.
+                show_and_focus_main_window(app);
+                Ok(())
+            }
+        },
+        "tray_stop_app" => match app_service::get_app().await {
+            Some(current_app) if current_app.installed && current_app.running => {
+                app_service::stop_app(current_app.name.clone()).await
+            }
+            _ => Ok(()),
+        },
+        _ => Ok(()),
+    }
+}
+
+// Opens the launcher's `logs/` directory so users can inspect app.log / console
+// output from the UI instead of hunting for it in the filesystem.
+#[tauri::command]
+pub fn open_logs_directory() -> Result<(), Error> {
+    let log_dir = std::env::current_exe()?
+        .parent()
+        .map(|dir| dir.join("logs"))
+        .ok_or_else(|| anyhow::anyhow!("The launcher executable has no parent directory"))?;
+    fs::create_dir_all(&log_dir)?;
+    #[cfg(target_os = "windows")]
+    let mut open_cmd = std::process::Command::new("explorer");
+    #[cfg(target_os = "macos")]
+    let mut open_cmd = std::process::Command::new("open");
+    #[cfg(target_os = "linux")]
+    let mut open_cmd = std::process::Command::new("xdg-open");
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        return Ok(());
+    }
+    open_cmd.arg(&log_dir).spawn()?;
+    info!("Opened logs directory {}", log_dir.display());
+    Ok(())
 }
 
 fn build_app_shortcut(

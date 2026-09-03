@@ -1,6 +1,7 @@
-import React, {useEffect, useRef} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
+import {invoke} from "@tauri-apps/api/core";
 import {openUrl} from '@tauri-apps/plugin-opener';
-import {Alert, Box, Button, CircularProgress, Container, LinearProgress, Link, Paper, Typography} from "@mui/material";
+import {Alert, Box, Button, CircularProgress, Container, LinearProgress, Link, Paper, Stack, Typography} from "@mui/material";
 import {alpha} from '@mui/material/styles';
 import {useTranslation} from 'react-i18next';
 import type {VersionChangeProgress} from './updateProgress';
@@ -67,9 +68,30 @@ const ConsolePage: React.FC<ConsolePageProps> = ({
                                                  }) => {
     const {t} = useTranslation();
     const consoleBodyRef = useRef<null | HTMLDivElement>(null);
+    const copyTimerRef = useRef<number | null>(null);
+    const [copied, setCopied] = useState(false);
     const lastFinishedLog = [...logs].reverse().find(log => log.finished);
     const internalIsProcessing = isProcessing && !lastFinishedLog;
     const processCompletedWithError = lastFinishedLog ? !!lastFinishedLog.error : null;
+
+    useEffect(() => {
+        return () => {
+            if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+        };
+    }, []);
+
+    const handleCopyLogs = () => {
+        const text = logs.map(log => log.message).join('\n');
+        navigator.clipboard.writeText(text).then(() => {
+            setCopied(true);
+            if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+            copyTimerRef.current = window.setTimeout(() => setCopied(false), 1500);
+        }).catch(err => console.error('Failed to copy logs:', err));
+    };
+
+    const handleOpenLogs = () => {
+        invoke('open_logs_directory').catch(err => console.error('Failed to open logs directory:', err));
+    };
 
     useEffect(() => {
         if (consoleBodyRef.current) {
@@ -200,7 +222,15 @@ const ConsolePage: React.FC<ConsolePageProps> = ({
                     <Typography>{t('No logs received yet for {{appName}}.', {appName})}</Typography>}
             </Paper>
 
-            <Box sx={{pt: 2, display: 'flex', justifyContent: 'flex-end'}}>
+            <Box sx={{pt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2}}>
+                <Stack direction="row" spacing={1}>
+                    <Button variant="outlined" size="small" onClick={handleCopyLogs} disabled={logs.length === 0}>
+                        {copied ? t('Copied!') : t('Copy Logs')}
+                    </Button>
+                    <Button variant="outlined" size="small" onClick={handleOpenLogs}>
+                        {t('Open Logs')}
+                    </Button>
+                </Stack>
                 <Button variant="contained" onClick={onBack}>
                     {internalIsProcessing ? t("Back (Process Running)") : t("Done")}
                 </Button>

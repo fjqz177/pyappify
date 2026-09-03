@@ -10,8 +10,20 @@ A modern Python packaging tool that turns one Python project into a distributabl
 *   **Focused App Management**: Each launcher manages one embedded application, with Git- and `pip`-backed upgrades, downgrades, and auto-generated update notes.
 *   **Blazing-Fast Updates**: Typical incremental take about one second.
 *   **Multiple Profiles**: Define and allow users to switch between different application profiles (e.g., CPU vs. CUDA versions) with unique entry points and dependencies.
+*   **Mirror-Friendly Install**: Users pick a pip mirror (PyPI / Tsinghua / Aliyun / USTC / Huawei / Tencent) and, for GPU profiles, a CUDA torch wheel source (official PyTorch / NJU mirror) when installing or switching profiles.
 *   **CI/CD Integration**: A dedicated GitHub Action can pre-build a full package with all dependencies included for offline distribution.
 *   **Aniti-Virus Friendly**: No large exe like pyinstaller which could cause the windows defender to delete, use the nsis setup packaging. 
+
+## Launcher UI
+
+The launcher shows a single app card with:
+
+* Install / Start / Stop / Delete / Change Profile actions.
+* Update method (manual / auto release / auto prerelease), a version picker, and inline release notes before confirming an upgrade or downgrade.
+* Settings: language, theme, pip cache directory, pip mirror, and the torch source (shown for GPU profiles only).
+* A live console page with copyable logs, an "Open Logs" button (`logs/` of the launcher), and progress for installs, version changes, and profile switches.
+
+Left-click on the tray icon opens the launcher window; right-click shows the tray menu (Open / Start / Stop / Quit). When auto-update is enabled, the launcher also checks for new releases every 6 hours while it stays in the tray (notifying — and updating — automatically).
 
 ## Quick Start: Prebuilt Launcher
 
