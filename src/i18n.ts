@@ -134,6 +134,10 @@ const resources = {
             "Copy Logs": "Copy Logs",
             "Open Logs": "Open Logs",
             "Copied!": "Copied!",
+            "Python Source": "Python Source",
+            "uv default": "uv default",
+            "GitHub": "GitHub",
+            "Used only when a new Python runtime is installed.": "Used only when a new Python runtime is installed.",
         }
     },
     'zh-CN': {
@@ -266,6 +270,10 @@ const resources = {
             "Copy Logs": "复制日志",
             "Open Logs": "打开日志目录",
             "Copied!": "已复制",
+            "Python Source": "Python 源",
+            "uv default": "uv 默认",
+            "GitHub": "GitHub（官方）",
+            "Used only when a new Python runtime is installed.": "仅在安装新的 Python 运行时生效。",
         }
     },
     'zh-TW': {
@@ -398,6 +406,10 @@ const resources = {
             "Copy Logs": "複製日誌",
             "Open Logs": "開啟日誌目錄",
             "Copied!": "已複製",
+            "Python Source": "Python 來源",
+            "uv default": "uv 預設",
+            "GitHub": "GitHub（官方）",
+            "Used only when a new Python runtime is installed.": "僅在安裝新的 Python 執行版時生效。",
         }
     },
     ja: {
@@ -530,6 +542,10 @@ const resources = {
             "Copy Logs": "ログをコピー",
             "Open Logs": "ログフォルダを開く",
             "Copied!": "コピーしました",
+            "Python Source": "Python ソース",
+            "uv default": "uv デフォルト",
+            "GitHub": "GitHub",
+            "Used only when a new Python runtime is installed.": "新しい Python ランタイムのインストール時のみ有効です。",
         }
     },
     ko: {
@@ -662,6 +678,10 @@ const resources = {
             "Copy Logs": "로그 복사",
             "Open Logs": "로그 폴더 열기",
             "Copied!": "복사됨",
+            "Python Source": "Python 소스",
+            "uv default": "uv 기본",
+            "GitHub": "GitHub",
+            "Used only when a new Python runtime is installed.": "새 Python 런타임 설치 시에만 적용됩니다。",
         }
     },
     es: {
@@ -794,6 +814,10 @@ const resources = {
             "Copy Logs": "Copiar registros",
             "Open Logs": "Abrir carpeta de registros",
             "Copied!": "Copiado",
+            "Python Source": "Fuente de Python",
+            "uv default": "uv por defecto",
+            "GitHub": "GitHub",
+            "Used only when a new Python runtime is installed.": "Solo se aplica al instalar un nuevo runtime de Python.",
         }
     },
 };

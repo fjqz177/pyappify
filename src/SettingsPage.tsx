@@ -41,6 +41,7 @@ interface ConfigItemFromRust {
 const PIP_CACHE_DIR_CONFIG_KEY = "Pip Cache Directory";
 const PIP_INDEX_URL_CONFIG_KEY = "Pip Index URL";
 const PIP_TORCH_INDEX_URL_CONFIG_KEY = "Pip Torch Index URL";
+const PYTHON_SOURCE_CONFIG_KEY = "Python Source";
 const LANGUAGE_CONFIG_KEY = "Language";
 
 const languageNames: { [key: string]: string } = { 'en': 'English', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', 'es': 'Español', 'ja': '日本語', 'ko': '한국어' };
@@ -60,6 +61,12 @@ const getTorchIndexUrlName = (url: string, t: (key: string) => string) => {
     if (url === '') return t('System Default');
     if (url.includes('pytorch.org')) return t('Official PyTorch');
     if (url.includes('nju.edu.cn')) return t('NJU Mirror');
+    return url;
+};
+
+const getPythonSourceUrlName = (url: string, t: (key: string) => string) => {
+    if (url === '') return t('uv default');
+    if (url.includes('github.com')) return t('GitHub');
     return url;
 };
 
@@ -117,6 +124,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ currentTheme, onChangeTheme
     const pipCacheConfig = getConfig(PIP_CACHE_DIR_CONFIG_KEY);
     const pipIndexUrlConfig = getConfig(PIP_INDEX_URL_CONFIG_KEY);
     const pipTorchIndexConfig = getConfig(PIP_TORCH_INDEX_URL_CONFIG_KEY);
+    const pythonSourceConfig = getConfig(PYTHON_SOURCE_CONFIG_KEY);
     // The PyTorch CUDA (cu126) source is only meaningful for the GPU variant;
     // show it only when the installed profile is GPU.
     const showTorchPicker = !!pipTorchIndexConfig && isGpuProfile(currentProfile);
@@ -130,6 +138,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ currentTheme, onChangeTheme
                     { label: t('Theme'), config: themeConfig, handler: (e: SelectChangeEvent) => onChangeTheme(e.target.value as ThemeModeSetting), renderOption: (o: string) => t(o.charAt(0).toUpperCase() + o.slice(1)) },
                     { label: t('Pip Cache Directory'), config: pipCacheConfig, handler: (e: SelectChangeEvent) => handleSettingChange(PIP_CACHE_DIR_CONFIG_KEY, e.target.value), renderOption: (o: string) => t(o) },
                     { label: t('Pip Index URL'), config: pipIndexUrlConfig, handler: (e: SelectChangeEvent) => handleSettingChange(PIP_INDEX_URL_CONFIG_KEY, e.target.value), renderOption: (o: string) => getPipIndexUrlName(o, t) },
+                    { label: t('Python Source'), config: pythonSourceConfig, handler: (e: SelectChangeEvent) => handleSettingChange(PYTHON_SOURCE_CONFIG_KEY, e.target.value), renderOption: (o: string) => getPythonSourceUrlName(o, t), helperText: t('Used only when a new Python runtime is installed.') },
                     ...(showTorchPicker ? [{ label: t('Torch Source'), config: pipTorchIndexConfig, handler: (e: SelectChangeEvent) => handleSettingChange(PIP_TORCH_INDEX_URL_CONFIG_KEY, e.target.value), renderOption: (o: string) => getTorchIndexUrlName(o, t), helperText: t('Only applies to the next install or profile change.') }] : []),
                 ].map(({ label, config, handler, renderOption, helperText }) => config && (
                     <Box key={label} sx={{my: 2}}>
