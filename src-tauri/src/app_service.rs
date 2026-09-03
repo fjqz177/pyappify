@@ -26,6 +26,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use once_cell::sync::Lazy;
 use rust_i18n::t;
+use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::{
     fs,
@@ -64,12 +65,171 @@ pub async fn set_startup_overrides(overrides: StartupOverrides) {
 
 fn check_python_env_exists(app_name: &str) -> bool {
     let python_path = get_python_dir(app_name);
-    let python_exe_path = python_path.join(if cfg!(windows) {
-        "python.exe"
-    } else {
-        "bin/python"
-    });
-    python_path.exists() && python_exe_path.exists()
+    python_path.exists()
+        && (python_env::is_uv_managed_python(app_name)
+            || python_path.join(if cfg!(windows) { "python.exe" } else { "bin/python" }).exists())
+}
+
+/// sha256 of the effective declarations that pin an environment:
+/// requirements content + pip_args + python spec. Matching fingerprints mean the
+/// installed environment is provably still in sync (uv never ran since).
+fn compute_env_fingerprint(
+    working_dir: &Path,
+    requirements_spec: &str,
+    pip_args: &str,
+    python_spec: &str,
+) -> String {
+    let content = get_relevant_content(requirements_spec, working_dir).unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    hasher.update(pip_args.as_bytes());
+    hasher.update(python_spec.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// Persist the environment backend/fingerprint on the app state.
+async fn save_env_state(
+    app_name: &str,
+    backend: &str,
+    fingerprint: Option<String>,
+) -> Result<(), Error> {
+    let app_to_save = {
+        let mut app_guard = APP.lock().await;
+        let app = app_guard
+            .as_mut()
+            .filter(|app| app.name == app_name)
+            .ok_or_else(|| err!("App '{}' not found.", app_name))?;
+        app.env_backend = Some(backend.to_string());
+        app.env_fingerprint = fingerprint;
+        app.clone()
+    };
+    save_app_config_to_json(&app_to_save).await?;
+    emit_app().await;
+    Ok(())
+}
+
+/// Delete every non-uv entry under the Python root (leftover raw interpreter
+/// files). Anything uv-managed (`cpython-*`) is never touched.
+fn cleanup_legacy_python_files(root: &Path) -> Result<(), Error> {
+    let entries: Vec<PathBuf> = std::fs::read_dir(root)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            !path
+                .file_name()
+                .map(|name| name.to_string_lossy().starts_with("cpython-"))
+                .unwrap_or(false)
+        })
+        .collect();
+    for path in entries {
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path)?;
+        } else {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
+/// One-time migration from the pre-uv embedded-python layout to uv-managed
+/// Python: the raw `python/` tree is renamed aside to `python.legacy/`, uv
+/// installs the requested Python, the profile requirements are reinstalled,
+/// and only then is the backup deleted. On failure the old raw layout is
+/// restored and the error is reported — start stays blocked (fail-closed).
+async fn migrate_legacy_python_env(app: &App) -> Result<(), Error> {
+    let app_name = app.name.clone();
+    let profile = app.get_current_profile_settings().clone();
+    let python_root = get_python_dir(&app_name);
+    let legacy_raw = python_root.join(if cfg!(windows) { "python.exe" } else { "bin/python" });
+    if !legacy_raw.exists() {
+        return Ok(());
+    }
+    if python_env::is_uv_managed_python(&app_name) {
+        info!(
+            "uv environment already present for '{}'; cleaning legacy files only.",
+            app_name
+        );
+        cleanup_legacy_python_files(&python_root)?;
+        return Ok(());
+    }
+
+    emit_info!(
+        &app_name,
+        "Migrating pre-uv Python install to uv-managed Python (requires_python='{}'; dependencies are reinstalled once).",
+        profile.requires_python
+    );
+    let working_dir = get_app_working_dir_path(&app_name);
+    let backup_dir = python_root.with_extension("legacy");
+    if backup_dir.exists() {
+        if let Err(e) = tokio::fs::remove_dir_all(&backup_dir).await {
+            warn!(
+                "Failed to clear old migration backup {}: {}",
+                backup_dir.display(),
+                e
+            );
+        }
+    }
+    std::fs::rename(&python_root, &backup_dir).map_err(|e| {
+        err!(
+            "Cannot back up legacy Python dir '{}': {}",
+            python_root.display(),
+            e
+        )
+    })?;
+
+    let result = async {
+        python_env::setup_python_env(app_name.clone(), &profile.requires_python).await?;
+        if !profile.requirements.is_empty() {
+            python_env::install_requirements(
+                &app_name,
+                &profile.requirements,
+                &working_dir,
+                &profile.pip_args,
+            )
+            .await?;
+        }
+        Ok::<(), Error>(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => {
+            emit_info!(
+                &app_name,
+                "uv migration complete; removing the legacy Python backup."
+            );
+            if let Err(e) = tokio::fs::remove_dir_all(&backup_dir).await {
+                warn!(
+                    "Failed to remove legacy backup {}: {}",
+                    backup_dir.display(),
+                    e
+                );
+            }
+            let fingerprint = compute_env_fingerprint(
+                &working_dir,
+                &profile.requirements,
+                &profile.pip_args,
+                &profile.requires_python,
+            );
+            save_env_state(&app_name, "uv", Some(fingerprint)).await?;
+            Ok(())
+        }
+        Err(error) => {
+            emit_error!(
+                &app_name,
+                "uv migration failed: {}. Restoring the previous Python environment.",
+                error
+            );
+            if let Err(restore_error) = std::fs::rename(&backup_dir, &python_root) {
+                warn!(
+                    "Failed to restore legacy Python from {}: {}",
+                    backup_dir.display(),
+                    restore_error
+                );
+            }
+            Err(error)
+        }
+    }
 }
 
 fn is_app_running(sys: &System, app_name: &str) -> bool {
@@ -978,6 +1138,13 @@ pub async fn setup_app(app_name: &str, profile_name: &str) -> Result<(), Error> 
         load_app_details(app).await?;
         app.installed = true;
         app.current_profile = final_profile_name_to_set.clone();
+        app.env_backend = Some("uv".to_string());
+        app.env_fingerprint = Some(compute_env_fingerprint(
+            &working_dir_path,
+            &profile_settings_for_setup.requirements,
+            &profile_settings_for_setup.pip_args,
+            &profile_settings_for_setup.requires_python,
+        ));
         let app_to_save = app.clone();
         drop(app_guard);
 
@@ -1631,6 +1798,13 @@ pub async fn start_app(app_handle: AppHandle, app_name: String) -> Result<(), Er
     let _guard = app_dir_lock.lock().await;
     ensure_app_is_ready_to_start(&app_name).await?;
 
+    // Pure-uv gate: a pre-uv environment must be migrated before starting.
+    // A failed migration blocks the start (fail-closed).
+    {
+        let app_snapshot = get_app().await.ok_or_else(|| err!("App is not loaded."))?;
+        migrate_legacy_python_env(&app_snapshot).await?;
+    }
+
     if !check_python_env_exists(&app_name) {
         warn!(
             "Python .venv not found for '{}'. Deleting app artifacts.",
@@ -1652,6 +1826,7 @@ pub async fn start_app(app_handle: AppHandle, app_name: String) -> Result<(), Er
         app_starting_version,
         update_note,
         configured_icon,
+        recorded_fingerprint,
     ) = {
         let mut app_guard = APP.lock().await;
         if let Some(app) = app_guard.as_mut().filter(|app| app.name == app_name) {
@@ -1673,6 +1848,7 @@ pub async fn start_app(app_handle: AppHandle, app_name: String) -> Result<(), Er
             let app_starting_version = app.app_starting_version.clone();
             let update_note = app.update_note.clone();
             let configured_icon = app.icon.clone();
+            let recorded_fingerprint = app.env_fingerprint.clone();
             let app_to_save = app.clone();
             drop(app_guard);
 
@@ -1689,6 +1865,7 @@ pub async fn start_app(app_handle: AppHandle, app_name: String) -> Result<(), Er
                 app_starting_version,
                 update_note,
                 configured_icon,
+                recorded_fingerprint,
             )
         } else {
             return Err(anyhow!("App '{}' not found.", app_name).into());
@@ -1712,20 +1889,34 @@ pub async fn start_app(app_handle: AppHandle, app_name: String) -> Result<(), Er
         profile_to_run_with.main_script
     );
 
+    // Fail-closed environment gate: sync whenever the declared requirements
+    // (content/pip_args/python spec) changed since the last successful sync, or
+    // when a previous sync was interrupted (marker). The fingerprint comparison
+    // is pure file math — the fast path spawns no process and touches no network.
     let marker_path = working_dir.join(python_env::PIP_UPDATE_NEEDED_MARKER);
-    if marker_path.exists() {
-        info!(
-            "Marker file found for app '{}' at {}. Attempting to re-install requirements.",
-            app_name,
-            marker_path.display()
-        );
-        python_env::install_requirements(
-            &app_name,
-            &profile_to_run_with.requirements,
-            &working_dir,
-            &profile_to_run_with.pip_args,
-        )
-        .await?;
+    let current_fingerprint = compute_env_fingerprint(
+        &working_dir,
+        &profile_to_run_with.requirements,
+        &profile_to_run_with.pip_args,
+        &profile_to_run_with.requires_python,
+    );
+    let needs_sync = marker_path.exists()
+        || recorded_fingerprint.as_deref() != Some(current_fingerprint.as_str());
+    if needs_sync {
+        if !profile_to_run_with.requirements.is_empty() {
+            emit_info!(
+                &app_name,
+                "Environment declarations changed (or a previous sync was interrupted). Syncing dependencies with uv."
+            );
+            python_env::install_requirements(
+                &app_name,
+                &profile_to_run_with.requirements,
+                &working_dir,
+                &profile_to_run_with.pip_args,
+            )
+            .await?;
+        }
+        save_env_state(&app_name, "uv", Some(current_fingerprint)).await?;
     }
 
     let pyappify_version = app_handle.package_info().version.to_string();

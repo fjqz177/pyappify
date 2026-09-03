@@ -71,6 +71,14 @@ pub struct App {
     pub profiles: Vec<Profile>,
     #[serde(default)]
     pub show_add_defender: bool,
+    /// Environment backend of the installed environment. `Some("uv")` after the
+    /// one-time legacy migration; `None` means legacy (pre-uv) install layout.
+    #[serde(default)]
+    pub env_backend: Option<String>,
+    /// Fingerprint of the last successful dependency sync (requirements content
+    /// + pip_args + python spec). `None` until the first uv sync after install.
+    #[serde(default)]
+    pub env_fingerprint: Option<String>,
 }
 
 fn default_last_start_fn() -> DateTime<Utc> {

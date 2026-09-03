@@ -1,5 +1,6 @@
 use lazy_static::lazy_static;
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
@@ -25,12 +26,34 @@ pub fn get_cwd() -> PathBuf {
     CWD.clone()
 }
 
+/// Scan the uv-managed layout (`cpython-<ver>-*/python.exe`) under a Python root.
+fn find_managed_python_exe(root: &Path) -> Option<PathBuf> {
+    let mut best: Option<(String, PathBuf)> = None;
+    if let Ok(entries) = fs::read_dir(root) {
+        for entry in entries.filter_map(Result::ok) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with("cpython-") {
+                continue;
+            }
+            let exe = entry.path().join("python.exe");
+            if exe.is_file() && best.as_ref().map_or(true, |(n, _)| name > *n) {
+                best = Some((name, exe));
+            }
+        }
+    }
+    best.map(|(_, exe)| exe)
+}
+
+/// Resolve the app's Python interpreter:
+/// 1. uv-managed layout (`cpython-*/python.exe`, newest patch wins);
+/// 2. legacy raw layout (`python/python.exe`) — kept only until migration.
 pub fn get_python_exe(app_name: &str, use_pythonw: bool) -> PathBuf {
     let python_dir = get_python_dir(app_name);
-    if use_pythonw {
-        python_dir.join("pythonw.exe")
-    } else {
-        python_dir.join("python.exe")
+    let managed = find_managed_python_exe(&python_dir);
+    match managed {
+        Some(exe) if use_pythonw => exe.with_file_name("pythonw.exe"),
+        Some(exe) => exe,
+        None => python_dir.join(if use_pythonw { "pythonw.exe" } else { "python.exe" }),
     }
 }
 
@@ -48,8 +71,10 @@ pub fn get_app_base_path(app_name: &str) -> PathBuf {
 pub fn get_app_working_dir_path(app_name: &str) -> PathBuf {
     get_app_base_path(app_name).join(WORKING_DIR_NAME)
 }
+/// uv package cache ("App Install Directory" option in settings). The old
+/// `cache/pip` directory is left untouched for historical installations.
 pub fn get_pip_cache_dir() -> PathBuf {
-    CWD.join("cache").join("pip")
+    CWD.join("cache").join("uv")
 }
 
 pub fn get_config_dir() -> PathBuf {
