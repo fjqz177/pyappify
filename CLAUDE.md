@@ -35,7 +35,7 @@ src-tauri/src/
   app.rs                  # App/Profile 结构 + app.json 原子写 + 缺省 profile 兜底
   app_service.rs          # 核心：setup/start/stop/update(带回滚)/load_app(自动更新+auto_start)/周期检查
   config_manager.rs       # 全局配置（pypi/torch 镜像、cache 目录）；已移除 Default Python Version 死配置
-  python_env.rs           # Python 下载(KNOWN_PATCHES 硬编码 3.7-3.13)+pip 安装(镜像红线+占位符)
+  python_env.rs           # 纯 uv：uv python install(UV_PYTHON_INSTALL_DIR 到 data/apps/<app>/python/) + uv pip install(镜像红线+占位符)；无 pip/python.org 回退链
   git.rs                  # git2 封装（tags/commit notes/checkout 回滚）
   utils/window.rs         # 托盘菜单(Open/Start/Stop/Quit) + 左键行为 + 快捷方式 + open_logs_directory
   locales/app.yml         # rust_i18n 文案（%{var} 语法）
@@ -45,7 +45,10 @@ src-tauri/src/
 - `app.json`（`data/apps/<app>/`）持久化 `update_state(Idle/Updating/Failed)`、`current_profile`、`auto_start`、`update_method`——重启恢复/重试失败更新靠它。
 - 启动 = `use_pythonw` 时生成 `.pyappify-shortcut.py` **pythonw supervisor**（防原生崩溃二次错误对话框；`os.execve` vs `subprocess.run` 两条路径，有单测锁定）。
 - pip 红线：profile `pip_args` 含 `--index-url/-i` 时**绕开用户所选镜像**（`use_config_index_url=false`）；GPU 用 `--extra-index-url` + 占位符（不触发该分支）。
-- 启动前不校验环境一致（指纹门控/uv 化仍在设计阶段，见主仓库记忆）；仅 `.pip_update_needed.tmp` marker 中断恢复。
+- **环境=fail-closed**：启动前 sha256 指纹比对（requirements 内容+pip_args+python spec），失配才幂等 `uv pip install`（快路径零进程零网络）；`env_backend=uv` 与 `env_fingerprint` 存 app.json。legacy（旧嵌入式 pip 版）环境在启动时**一次性迁移**（raw `python/` → `python.legacy/` → uv 重建 → 验证后删备份，失败恢复并拦截）；`PIP_UPDATE_NEEDED_MARKER` 中断恢复保留。
+- 红线（uv 版）：`pip_args` 含 `--index-url/-i` 时绕开用户所选镜像（`use_config_index_url=false`）；GPU 用 `--extra-index-url` + `{PIP_TORCH_INDEX_URL}` 占位符展开（空格/等号两种形式，有单测）。
+- uv.exe 定位：`UV_EXECUTABLE` env > launcher 旁 sidecar（构建期由 action `uv_version` input 注入）> PATH；缺失即明确报错。
+- 纯 uv 分支无 pip 回退；`uv` 装的 python 无 pip（顺手堵死 app 子进程偷装 pip）。
 
 ## 常用命令
 
