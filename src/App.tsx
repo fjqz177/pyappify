@@ -704,9 +704,7 @@ function App() {
         beginConsoleSession(params.appName, `Initiating ${params.actionType} for '${params.appName}' to version '${params.version}'...`);
         setInlineConsoles(prev => ({...prev, [params.appName]: 'update'}));
 
-        const requirementsFile = app?.profiles?.find(p => p.name === app.current_profile)?.requirements || "requirements.txt";
-
-        await invokeTauriCommandWrapper<void>("update_to_version", {appName: params.appName, version: params.version, requirements: requirementsFile}, () => {},
+        await invokeTauriCommandWrapper<void>("update_to_version", {appName: params.appName, version: params.version}, () => {},
             (errorMessage, rawError) => {
                 console.error(`Failed to invoke ${params.actionType.toLowerCase()}:`, rawError);
                 const operationError = `Upgrade failed: ${errorMessage}`;
@@ -809,6 +807,18 @@ function App() {
         setCurrentPage('changeProfile');
     };
 
+    // Persist the user-chosen torch mirror before a GPU install/profile change,
+    // so the very next pip run (setup_app) picks it up. No-op for CPU profiles.
+    const saveTorchIndexIfGpu = useCallback((profileName: string) => {
+        if (!isGpuProfile(profileName) || !selectedTorchIndex) return Promise.resolve();
+        return invokeTauriCommandWrapper<void>(
+            'update_config_item',
+            {name: 'Pip Torch Index URL', value: selectedTorchIndex},
+            () => {},
+            (errorMessage) => console.error(`Failed to save torch index: ${errorMessage}`),
+        );
+    }, [selectedTorchIndex]);
+
     const handleConfirmProfileChange = async (appName: string, newProfileName: string) => {
         clearMessages();
         setAppActionLoading(prev => ({...prev, [appName]: true}));
@@ -840,10 +850,13 @@ function App() {
         if (!status.info && !status.error) setSnackbarOpen(false);
     }, [status.info, status.error, status.messageLoading, updateStatus, currentPage]);
 
-    // When the profile chooser is open, load the torch-source (cu126) config so
-    // a GPU selection can also pick the mirror to install torch/torchaudio from.
+    // When the profile chooser or the change-profile page is open, load the
+    // torch-source (cu126) config so a GPU selection can also pick the mirror to
+    // install torch/torchaudio from — including first-time CPU -> GPU switches.
     useEffect(() => {
-        if (currentPage !== 'profileChooser' || !profileChoiceApp) return;
+        const torchPickerVisible = (currentPage === 'profileChooser' && !!profileChoiceApp)
+            || (currentPage === 'changeProfile' && !!appForProfileChange);
+        if (!torchPickerVisible) return;
         invoke<{ name: string; value: string | number | boolean; options?: (string | number | boolean)[] }[]>('get_config_payload')
             .then(cfgs => {
                 const torch = cfgs.find(c => c.name === 'Pip Torch Index URL');
@@ -853,7 +866,7 @@ function App() {
                 }
             })
             .catch(err => console.error('Failed to load torch index config:', err));
-    }, [currentPage, profileChoiceApp]);
+    }, [currentPage, profileChoiceApp, appForProfileChange]);
 
     const handleCheckForUpdates = async (appName: string) => {
         clearMessages();
@@ -925,9 +938,7 @@ function App() {
                         <Stack direction="row" spacing={2} sx={{mt: 3, justifyContent: 'flex-end'}}>
                             <Button variant="outlined" onClick={() => setCurrentPage('list')}>{t('Cancel')}</Button>
                             <Button variant="contained" onClick={async () => {
-                                if (isGpuProfile(selectedProfileForInstall) && selectedTorchIndex) {
-                                    await invokeTauriCommandWrapper<void>('update_config_item', {name: 'Pip Torch Index URL', value: selectedTorchIndex}, () => {}, (errorMessage, rawError) => console.error(`Failed to save torch index: ${errorMessage}`, rawError));
-                                }
+                                await saveTorchIndexIfGpu(selectedProfileForInstall);
                                 handleInstallWithProfile(profileChoiceApp.name, selectedProfileForInstall);
                             }} disabled={!selectedProfileForInstall || appActionLoading[profileChoiceApp.name]}>
                                 {appActionLoading[profileChoiceApp.name] ? t("Starting Install...") : t("Confirm & Install")}
@@ -955,9 +966,23 @@ function App() {
                                 {appForProfileChange.profiles.map(p => <MenuItem key={p.name} value={p.name} disabled={p.name === appForProfileChange.current_profile}>{p.name}{p.name === appForProfileChange.current_profile && t(" (Current)")}</MenuItem>)}
                             </Select>
                         </FormControl>
+                        {isGpuProfile(selectedNewProfileName) && torchIndexConfig && torchIndexConfig.options && torchIndexConfig.options.length > 0 && (
+                            <>
+                                <FormControl fullWidth sx={{my: 2}}>
+                                    <InputLabel id="torch-index-label">{t('Torch Source')}</InputLabel>
+                                    <Select labelId="torch-index-label" value={selectedTorchIndex} label={t('Torch Source')} onChange={(e) => setSelectedTorchIndex(e.target.value)}>
+                                        {torchIndexConfig.options.map(o => <MenuItem key={String(o)} value={String(o)}>{getTorchIndexUrlName(String(o), t)}</MenuItem>)}
+                                    </Select>
+                                </FormControl>
+                                <Typography variant="caption" color="text.secondary" sx={{display: 'block', mt: -1}}>{t('Only applies to the next install or profile change.')}</Typography>
+                            </>
+                        )}
                         <Stack direction="row" spacing={2} sx={{mt: 3, justifyContent: 'flex-end'}}>
                             <Button variant="outlined" onClick={() => setCurrentPage('list')}>{t('Cancel')}</Button>
-                            <Button variant="contained" onClick={() => handleConfirmProfileChange(appForProfileChange.name, selectedNewProfileName)} disabled={!selectedNewProfileName || selectedNewProfileName === appForProfileChange.current_profile || appActionLoading[appForProfileChange.name]}>
+                            <Button variant="contained" onClick={async () => {
+                                await saveTorchIndexIfGpu(selectedNewProfileName);
+                                handleConfirmProfileChange(appForProfileChange.name, selectedNewProfileName);
+                            }} disabled={!selectedNewProfileName || selectedNewProfileName === appForProfileChange.current_profile || appActionLoading[appForProfileChange.name]}>
                                 {appActionLoading[appForProfileChange.name] ? t("Initiating...") : t("Change Profile")}
                             </Button>
                         </Stack>

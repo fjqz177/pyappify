@@ -1,5 +1,4 @@
 // src/config_manager.rs
-use crate::python_env::get_supported_python_versions;
 use crate::utils::error::Error;
 use crate::utils::path::get_config_dir;
 use crate::utils::path::get_pip_cache_dir;
@@ -16,8 +15,6 @@ use tracing::{error, info, warn};
 const PIP_CACHE_DIR_CONFIG_KEY: &str = "Pip Cache Directory";
 const PIP_CACHE_DIR_OPTION_APP_INSTALL: &str = "App Install Directory";
 const PIP_CACHE_DIR_OPTION_SYSTEM_DEFAULT: &str = "System Default";
-const DEFAULT_PYTHON_VERSION_CONFIG_KEY: &str = "Default Python Version";
-
 const PIP_INDEX_URL_CONFIG_KEY: &str = "Pip Index URL";
 const PIP_INDEX_URL_OPTION_SYSTEM_DEFAULT: &str = "";
 const PIP_INDEX_URL_OPTION_PYPI: &str = "https://pypi.org/simple/";
@@ -181,29 +178,6 @@ impl AppConfig {
                     ConfigValue::String(PIP_CACHE_DIR_OPTION_SYSTEM_DEFAULT.to_string()),
                     ConfigValue::String(PIP_CACHE_DIR_OPTION_APP_INSTALL.to_string()),
                 ]),
-            },
-        );
-
-        let supported_python_versions = get_supported_python_versions();
-        let python_version_options: Vec<ConfigValue> = supported_python_versions
-            .into_iter()
-            .map(ConfigValue::String)
-            .collect();
-
-        let default_python_version_str = "3.12".to_string();
-
-        items.insert(
-            DEFAULT_PYTHON_VERSION_CONFIG_KEY.to_string(),
-            ConfigItem {
-                name: DEFAULT_PYTHON_VERSION_CONFIG_KEY.to_string(),
-                description: "The default Python version to be used.".to_string(),
-                value: ConfigValue::String(default_python_version_str.clone()),
-                default_value: ConfigValue::String(default_python_version_str),
-                options: if python_version_options.is_empty() {
-                    None
-                } else {
-                    Some(python_version_options)
-                },
             },
         );
 

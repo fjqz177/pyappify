@@ -43,7 +43,7 @@ const PIP_INDEX_URL_CONFIG_KEY = "Pip Index URL";
 const PIP_TORCH_INDEX_URL_CONFIG_KEY = "Pip Torch Index URL";
 const LANGUAGE_CONFIG_KEY = "Language";
 
-const languageNames: { [key: string]: string } = { 'en': 'English', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', 'es': 'Español', 'ja': '日本語', 'ko': '한국인' };
+const languageNames: { [key: string]: string } = { 'en': 'English', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', 'es': 'Español', 'ja': '日本語', 'ko': '한국어' };
 
 const getPipIndexUrlName = (url: string, t: (key: string) => string) => {
     if (url === '') return t('System Default');

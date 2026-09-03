@@ -1,5 +1,5 @@
 // src/UpdateLogPage.tsx
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {invoke} from "@tauri-apps/api/core";
 import {Alert, Box, Button, CircularProgress, Link, Paper, Stack, Typography} from "@mui/material";
 import {openUrl} from '@tauri-apps/plugin-opener';
@@ -48,27 +48,29 @@ const UpdateLogPage: React.FC<UpdateLogPanelProps> = ({
     const prevCompletedRef = useRef(completed);
     const prevFailedRef = useRef(failed);
 
-    useEffect(() => {
-        const fetchNotes = async () => {
-            setNotesLoading(true);
-            setNotes(null);
-            setNotesError(null);
-            try {
-                const fetchedNotes = await invoke<string[]>("get_update_notes", {appName, version});
-                setNotes(fetchedNotes.join("\n"));
-            } catch (err) {
-                console.error(`Failed to get notes for ${appName} version ${version}:`, err);
-                const errorMessage = err instanceof Error ? err.message : String(err);
-                setNotesError(t('Failed to load notes: {{error}}', {error: errorMessage}));
-            } finally {
-                setNotesLoading(false);
-            }
-        };
+    // Fetchable per version/detail so a transient network failure can be retried
+    // without unmounting the whole panel or losing the selected target version.
+    const fetchNotes = useCallback(async () => {
+        setNotesLoading(true);
+        setNotes(null);
+        setNotesError(null);
+        try {
+            const fetchedNotes = await invoke<string[]>("get_update_notes", {appName, version});
+            setNotes(fetchedNotes.join("\n"));
+        } catch (err) {
+            console.error(`Failed to get notes for ${appName} version ${version}:`, err);
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            setNotesError(t('Failed to load notes: {{error}}', {error: errorMessage}));
+        } finally {
+            setNotesLoading(false);
+        }
+    }, [appName, version, t]);
 
+    useEffect(() => {
         if (appName && version) {
             fetchNotes();
         }
-    }, [appName, version, t]);
+    }, [fetchNotes]);
 
     // Fire OS notification when completed or failed state changes
     useEffect(() => {
@@ -173,7 +175,10 @@ const UpdateLogPage: React.FC<UpdateLogPanelProps> = ({
             )}
             {notesError && (
                 <Alert severity="error" sx={{my: 1}}>
-                    {notesError}
+                    {notesError}{' '}
+                    <Button key={`retry-${appName}-${version}`} size="small" color="inherit" onClick={fetchNotes}>
+                        {t('Retry')}
+                    </Button>
                 </Alert>
             )}
 
@@ -216,7 +221,9 @@ const UpdateLogPage: React.FC<UpdateLogPanelProps> = ({
                         size="small"
                         color={actionType === 'Upgrade' ? 'success' : 'warning'}
                         onClick={handleConfirm}
-                        disabled={notesLoading || !!notesError}
+                        // Notes are informational only: a failed fetch must not block
+                        // the version change (the backend retries the update itself).
+                        disabled={notesLoading}
                     >
                         {confirmButtonText}
                     </Button>

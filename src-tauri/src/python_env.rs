@@ -412,13 +412,6 @@ fn get_latest_known_patch_for_major_minor(major_minor: &str) -> Result<String> {
     ))
 }
 
-pub fn get_supported_python_versions() -> Vec<String> {
-    KNOWN_PATCHES
-        .iter()
-        .map(|(patch, _, _, _)| patch.to_string())
-        .collect()
-}
-
 fn get_user_agent() -> String {
     let random_string: String = rand::rng()
         .sample_iter(Alphanumeric)
